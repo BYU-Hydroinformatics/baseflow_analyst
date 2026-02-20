@@ -916,9 +916,9 @@ def api_gage_drought(site_no):
 # Flow Anomaly Detection
 # =====================================================
 
-def detect_anomalies(site_no):
+def detect_anomalies(site_no, sf_dir=None, p_dir=None, b_dir=None):
     """Detect extreme low-flow and high-flow events by running BFS on-the-fly."""
-    data = run_bfs_on_the_fly(site_no)
+    data = run_bfs_on_the_fly(site_no, sf_dir=sf_dir, p_dir=p_dir, b_dir=b_dir)
     if data is None:
         return []
 
@@ -1071,11 +1071,21 @@ def api_gage_anomalies(site_no):
         return jsonify({'error': 'Gage not found'}), 404
     if get_gage_status(site_no) != 'calibrated':
         return jsonify({'error': 'Not calibrated. Run calibration first.'}), 400
-    streamflow_path = os.path.join(STREAMFLOW_DIR, f"{site_no}.csv")
-    if not os.path.exists(streamflow_path):
-        return jsonify({'error': 'No local streamflow data for this gage. Click Update to fetch it from USGS first.'}), 404
+
+    # Prefer temp (updated/recalibrated) data if available, otherwise use main dirs
+    temp_site_dir = os.path.join(TEMP_DIR, site_no)
+    temp_sf = os.path.join(temp_site_dir, f"{site_no}.csv")
+    main_sf = os.path.join(STREAMFLOW_DIR, f"{site_no}.csv")
+
+    if os.path.exists(temp_sf):
+        sf_dir, p_dir, b_dir = temp_site_dir, temp_site_dir, temp_site_dir
+    elif os.path.exists(main_sf):
+        sf_dir, p_dir, b_dir = None, None, None  # use defaults
+    else:
+        return jsonify({'error': 'No streamflow data for this gage. Click Update to fetch it from USGS first.'}), 404
+
     try:
-        events = detect_anomalies(site_no)
+        events = detect_anomalies(site_no, sf_dir=sf_dir, p_dir=p_dir, b_dir=b_dir)
         return jsonify({'events': events})
     except Exception as e:
         return jsonify({'error': f'Anomaly detection failed: {str(e)}'}), 500
