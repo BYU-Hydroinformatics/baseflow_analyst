@@ -47,6 +47,15 @@
             cursor: pointer; font-size: 18px; line-height: 28px; text-align: center;
         }
         .close-btn:hover { background: rgba(255,255,255,0.35); }
+        .fav-btn {
+            position: absolute; top: 12px; right: 48px;
+            background: rgba(255,255,255,0.2); border: none; color: white;
+            width: 28px; height: 28px; border-radius: 50%;
+            cursor: pointer; font-size: 16px; line-height: 28px; text-align: center;
+            transition: background 0.15s;
+        }
+        .fav-btn:hover { background: rgba(255,255,255,0.35); }
+        .fav-btn.active { color: #FFD600; }
 
         /* Panel body */
         .panel-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
@@ -291,6 +300,7 @@
         <div id="panel">
             <div class="panel-header">
                 <button class="close-btn" onclick="closePanel()">&times;</button>
+                <button class="fav-btn" id="fav-btn" onclick="toggleFavorite(selectedSite)" title="Toggle favorite">&#9734;</button>
                 <h2 id="panel-title">Gage Details</h2>
                 <div class="subtitle" id="panel-subtitle"></div>
             </div>
@@ -321,6 +331,19 @@
         let eventSource = null;
         let currentDataSource = 'original';  // 'original' or 'updated'
         let hasUpdatedResults = {};  // site_no -> bool
+        let favorites = new Set();
+        let filterFavoritesOnly = false;
+
+        function loadFavorites() {
+            try {
+                const stored = localStorage.getItem('baseflow_favorites');
+                if (stored) favorites = new Set(JSON.parse(stored));
+            } catch (e) { /* ignore corrupt data */ }
+        }
+
+        function saveFavorites() {
+            localStorage.setItem('baseflow_favorites', JSON.stringify([...favorites]));
+        }
 
         // ===== Plotly layout defaults =====
         const plotlyConfig = {
@@ -427,6 +450,10 @@
                         <span class="toggle-switch" id="lowflow-toggle"></span>
                         <span>Low flow</span>
                     </div>
+                    <div class="toggle-row" onclick="toggleFavoritesOnly()">
+                        <span class="toggle-switch" id="fav-toggle"></span>
+                        <span>&#9733; Favorites only</span>
+                    </div>
                 `;
                 L.DomEvent.disableClickPropagation(div);
                 return div;
@@ -454,9 +481,10 @@
             for (const gage of allGages) {
                 const isCalibrated = gage.status === 'calibrated';
                 const color = isCalibrated ? '#2e7d32' : '#e65100';
+                const isFav = favorites.has(gage.site_no);
                 const marker = L.circleMarker([gage.lat, gage.lng], {
-                    radius: 6, fillColor: color, color: '#fff',
-                    weight: 1.5, opacity: 1, fillOpacity: 0.85,
+                    radius: 6, fillColor: color, color: isFav ? '#FFD600' : '#fff',
+                    weight: isFav ? 2.5 : 1.5, opacity: 1, fillOpacity: 0.85,
                 });
                 marker.bindTooltip(`<b>${gage.site_no}</b><br>${gage.name}`, { direction: 'top', offset: [0, -8] });
                 marker.on('click', () => openPanel(gage.site_no));
@@ -474,6 +502,7 @@
                 if (filterRefOnly && gage.ref_status !== 'Ref') return false;
                 if (filterNaturalOnly && gage.behavior !== 'Natural') return false;
                 if (filterLowFlowOnly && !gage.has_lowflow) return false;
+                if (filterFavoritesOnly && !favorites.has(gage.site_no)) return false;
                 return true;
             });
         }
@@ -522,6 +551,45 @@
             refreshMarkers();
         }
 
+        function toggleFavoritesOnly() {
+            const toggle = document.getElementById('fav-toggle');
+            filterFavoritesOnly = !filterFavoritesOnly;
+            toggle.classList.toggle('on');
+            refreshMarkers();
+        }
+
+        function toggleFavorite(siteNo) {
+            if (!siteNo) return;
+            if (favorites.has(siteNo)) {
+                favorites.delete(siteNo);
+            } else {
+                favorites.add(siteNo);
+            }
+            saveFavorites();
+            updateFavButton(siteNo);
+            updateMarkerFavStyle(siteNo);
+            if (filterFavoritesOnly) refreshMarkers();
+        }
+
+        function updateFavButton(siteNo) {
+            const btn = document.getElementById('fav-btn');
+            if (!btn) return;
+            const isFav = favorites.has(siteNo);
+            btn.innerHTML = isFav ? '&#9733;' : '&#9734;';
+            btn.classList.toggle('active', isFav);
+            btn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
+        }
+
+        function updateMarkerFavStyle(siteNo) {
+            const marker = markerMap[siteNo];
+            if (!marker) return;
+            const isFav = favorites.has(siteNo);
+            marker.setStyle({
+                weight: isFav ? 2.5 : 1.5,
+                color: isFav ? '#FFD600' : '#fff',
+            });
+        }
+
         // ===== Panel =====
         function openPanel(siteNo) {
             // Remove previous star marker
@@ -537,6 +605,7 @@
             }
             document.getElementById('panel').classList.add('open');
             map.invalidateSize();
+            updateFavButton(siteNo);
             document.getElementById('panel-body').innerHTML = '<div class="loading"><span class="spinner"></span> Loading gage info...</div>';
             loadGageDetails(siteNo);
         }
@@ -1367,6 +1436,7 @@
         });
 
         // ===== Init =====
+        loadFavorites();
         initMap();
         loadGages().then(() => initSearch());
     </script>
