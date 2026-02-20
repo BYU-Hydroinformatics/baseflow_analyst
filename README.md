@@ -4,6 +4,21 @@ An interactive web application for exploring and analyzing baseflow separation a
 
 ---
 
+## Quick Start
+
+```bash
+git clone git@github.com:BYU-Hydroinformatics/baseflow_analyst.git
+cd baseflow_analyst
+python -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+
+Then open **http://127.0.0.1:5000** in your browser. The app ships with pre-calibrated results for 8,729 USGS gages, so no data pipeline steps are required to start exploring.
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -117,15 +132,15 @@ The `pybfs` and `baseflow` libraries ship as subdirectories under the project ro
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-org>/pybfs-app.git
-cd pybfs-app
+git clone git@github.com:BYU-Hydroinformatics/baseflow_analyst.git
+cd baseflow_analyst
 
 # Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 
 # Install dependencies
-pip install flask pandas numpy matplotlib scipy statsmodels numba
+pip install -r requirements.txt
 ```
 
 > **Note:** `numba` requires a C compiler. On macOS install Xcode Command Line Tools (`xcode-select --install`). On Linux ensure `gcc` is available.
