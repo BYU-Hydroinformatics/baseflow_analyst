@@ -926,6 +926,14 @@ def detect_anomalies(site_no):
     dates_list = data['dates']
     qob_ms = np.array([v if v is not None else np.nan for v in data['qob']], dtype=float)
 
+    # Compute the downsampling step used in run_bfs_on_the_fly so duration
+    # thresholds and reported values reflect actual days, not downsampled indices.
+    import math
+    total_points = data.get('total_points', len(dates_list))
+    step = max(1, round(total_points / max(len(dates_list), 1)))
+    # Minimum consecutive downsampled points that represent 7 real days
+    min_duration = max(1, math.ceil(7 / step))
+
     # Percentile thresholds
     p5 = np.nanpercentile(qob_ms, 5)
     p95 = np.nanpercentile(qob_ms, 95)
@@ -952,14 +960,15 @@ def detect_anomalies(site_no):
 
         for s, e in runs:
             duration = e - s + 1
-            if duration < 7:
+            if duration < min_duration:
                 continue
+            actual_days = duration * step  # convert to real calendar days
             segment = qob_ms[s:e+1]
             event = {
                 'type': label,
                 'start_date': str(dates_list[s])[:10],
                 'end_date': str(dates_list[e])[:10],
-                'duration': duration,
+                'duration': actual_days,
                 'min_flow': round(float(np.nanmin(segment)), 4),
                 'max_flow': round(float(np.nanmax(segment)), 4),
                 'mean_flow': round(float(np.nanmean(segment)), 4),
@@ -967,11 +976,11 @@ def detect_anomalies(site_no):
                 'severity': 0.0,
                 'drought_context': '',
             }
-            # Severity score: duration weighted by how far from threshold
+            # Severity score: actual days weighted by how far from threshold
             if label == 'low_flow' and threshold > 0:
-                event['severity'] = duration * (1 - event['mean_flow'] / threshold)
+                event['severity'] = actual_days * (1 - event['mean_flow'] / threshold)
             else:
-                event['severity'] = duration * (event['mean_flow'] / max(threshold, 0.001))
+                event['severity'] = actual_days * (event['mean_flow'] / max(threshold, 0.001))
             events.append(event)
 
     # Sort by severity descending, keep top 10
@@ -1062,6 +1071,9 @@ def api_gage_anomalies(site_no):
         return jsonify({'error': 'Gage not found'}), 404
     if get_gage_status(site_no) != 'calibrated':
         return jsonify({'error': 'Not calibrated. Run calibration first.'}), 400
+    streamflow_path = os.path.join(STREAMFLOW_DIR, f"{site_no}.csv")
+    if not os.path.exists(streamflow_path):
+        return jsonify({'error': 'No local streamflow data for this gage. Click Update to fetch it from USGS first.'}), 404
     try:
         events = detect_anomalies(site_no)
         return jsonify({'events': events})
