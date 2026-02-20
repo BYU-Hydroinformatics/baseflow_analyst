@@ -75,6 +75,7 @@
         .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .btn-primary { background: linear-gradient(135deg, #1a73e8, #0d47a1); color: white; }
         .btn-update { background: linear-gradient(135deg, #00897b, #004d40); color: white; }
+        .btn-recalibrate { background: linear-gradient(135deg, #f57c00, #e65100); color: white; }
 
         /* Progress section */
         .progress-section { background: #f8f9fa; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
@@ -630,8 +631,10 @@
             html += `<div class="btn-row">`;
             if (info.status !== 'calibrated') {
                 html += `<button class="action-btn btn-primary" id="process-btn" onclick="startProcessing('${siteNo}')">Calibrate</button>`;
+            } else {
+                html += `<button class="action-btn btn-update" id="update-btn" onclick="startUpdate('${siteNo}')">Update</button>`;
+                html += `<button class="action-btn btn-recalibrate" id="recalibrate-btn" onclick="startRecalibrate('${siteNo}')">Recalibrate</button>`;
             }
-            html += `<button class="action-btn btn-update" id="update-btn" onclick="startUpdate('${siteNo}')">Update Data</button>`;
             html += `</div>`;
 
             // Drought section
@@ -1063,7 +1066,7 @@
             startProgressTracking(siteNo, 'original');
         }
 
-        // ===== Update Data (fresh USGS fetch) =====
+        // ===== Update Data (fresh USGS fetch, reuse existing params) =====
         async function startUpdate(siteNo) {
             const btn = document.getElementById('update-btn');
             btn.disabled = true;
@@ -1075,21 +1078,39 @@
             if (result.error) {
                 document.getElementById('progress-container').innerHTML = `<div class="error-msg">${result.error}</div>`;
                 btn.disabled = false;
-                btn.textContent = 'Update Data';
+                btn.textContent = 'Update';
                 return;
             }
 
             btn.style.display = 'none';
-            // Hide process btn too if exists
-            const pBtn = document.getElementById('process-btn');
-            if (pBtn) pBtn.style.display = 'none';
-
+            document.getElementById('recalibrate-btn').style.display = 'none';
             startProgressTracking(siteNo, 'updated');
+        }
+
+        // ===== Recalibrate (fresh USGS fetch + full recalibration) =====
+        async function startRecalibrate(siteNo) {
+            const btn = document.getElementById('recalibrate-btn');
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+
+            const resp = await fetch(`/api/gage/${siteNo}/recalibrate`, { method: 'POST' });
+            const result = await resp.json();
+
+            if (result.error) {
+                document.getElementById('progress-container').innerHTML = `<div class="error-msg">${result.error}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Recalibrate';
+                return;
+            }
+
+            btn.style.display = 'none';
+            document.getElementById('update-btn').style.display = 'none';
+            startProgressTracking(siteNo, 'recalibrated');
         }
 
         // ===== Progress Tracking =====
         function startProgressTracking(siteNo, source) {
-            let secondsLeft = source === 'updated' ? 130 : 100;
+            let secondsLeft = source === 'recalibrated' ? 130 : source === 'updated' ? 30 : 100;
 
             const container = document.getElementById('progress-container');
             container.innerHTML = `
@@ -1109,7 +1130,7 @@
                 if (el) el.textContent = secondsLeft > 0 ? formatTime(secondsLeft) : 'Almost done...';
             }, 1000);
 
-            const sourceParam = source === 'updated' ? '?source=updated' : '';
+            const sourceParam = (source === 'updated' || source === 'recalibrated') ? `?source=${source}` : '';
             eventSource = new EventSource(`/api/gage/${siteNo}/progress${sourceParam}`);
             eventSource.onmessage = function(event) {
                 const data = JSON.parse(event.data);
@@ -1121,7 +1142,7 @@
                 if (data.done) {
                     cleanupProgress();
                     if (data.stage === 'done') {
-                        if (source === 'updated') {
+                        if (source === 'updated' || source === 'recalibrated') {
                             hasUpdatedResults[siteNo] = true;
                             currentDataSource = 'updated';
                             // Reload panel to show tabs

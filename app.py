@@ -631,8 +631,90 @@ def api_update_gage(site_no):
 
 
 def run_update_processing(site_no):
-    """Background: fetch fresh USGS data, calibrate, run BFS in temp directory."""
+    """Background: fetch fresh USGS streamflow and reuse existing calibration parameters."""
     status_key = f"update_{site_no}"
+    try:
+        # Step 1: Fetch latest streamflow from USGS
+        processing_status[status_key].update({
+            'stage': 'downloading', 'progress': 10,
+            'message': 'Downloading latest streamflow data from USGS...',
+        })
+        fresh_df = fetch_usgs_streamflow(site_no)
+        if fresh_df is None or len(fresh_df) == 0:
+            processing_status[status_key].update({
+                'stage': 'error', 'progress': 0,
+                'message': 'Could not retrieve streamflow data from USGS.',
+                'error': 'No data returned', 'done': True,
+            })
+            return
+
+        n_records = len(fresh_df)
+        processing_status[status_key].update({
+            'stage': 'downloaded', 'progress': 60,
+            'message': f'Downloaded {n_records:,} daily records. Loading existing calibration parameters...',
+        })
+
+        # Step 2: Verify existing calibration parameters exist
+        params_path = os.path.join(PARAMS_DIR, f"params_{site_no}.csv")
+        bff_path = os.path.join(BFF_DIR, f"bff_{site_no}.csv")
+        if not os.path.exists(params_path) or not os.path.exists(bff_path):
+            processing_status[status_key].update({
+                'stage': 'error', 'progress': 0,
+                'message': 'No calibration parameters found. Use Recalibrate to generate them.',
+                'error': 'Missing calibration parameters', 'done': True,
+            })
+            return
+
+        # Step 3: Set up temp directory and save fresh streamflow
+        temp_site_dir = os.path.join(TEMP_DIR, site_no)
+        os.makedirs(temp_site_dir, exist_ok=True)
+        fresh_df.to_csv(os.path.join(temp_site_dir, f"{site_no}.csv"), index=False)
+
+        # Copy existing params/bff into temp so run_bfs_on_the_fly can find them
+        shutil.copy2(params_path, os.path.join(temp_site_dir, f"params_{site_no}.csv"))
+        shutil.copy2(bff_path, os.path.join(temp_site_dir, f"bff_{site_no}.csv"))
+
+        processing_status[status_key].update({
+            'stage': 'done', 'progress': 100,
+            'message': f'Streamflow updated! ({n_records:,} records) Using existing calibration parameters.',
+            'done': True,
+            'n_records': n_records,
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        processing_status[status_key].update({
+            'stage': 'error', 'progress': 0,
+            'message': f'Update error: {str(e)}', 'error': str(e), 'done': True,
+        })
+
+
+# =====================================================
+# Recalibrate Feature (fresh USGS fetch + full recalibration)
+# =====================================================
+
+@app.route('/api/gage/<site_no>/recalibrate', methods=['POST'])
+def api_recalibrate_gage(site_no):
+    """Fetch latest USGS data and run full recalibration in a temp directory."""
+    if site_no not in site_info:
+        return jsonify({'error': 'Gage not found'}), 404
+
+    status_key = f"recalibrate_{site_no}"
+    if status_key in processing_status and not processing_status[status_key].get('done'):
+        return jsonify({'status': 'already_processing'})
+
+    processing_status[status_key] = {
+        'stage': 'starting', 'progress': 0,
+        'message': 'Starting recalibration...', 'error': None, 'done': False,
+    }
+    thread = threading.Thread(target=run_recalibrate_processing, args=(site_no,), daemon=True)
+    thread.start()
+    return jsonify({'status': 'started'})
+
+
+def run_recalibrate_processing(site_no):
+    """Background: fetch fresh USGS data, recalibrate, and save results to temp directory."""
+    status_key = f"recalibrate_{site_no}"
     try:
         # Step 1: Fetch latest streamflow from USGS
         processing_status[status_key].update({
@@ -671,11 +753,9 @@ def run_update_processing(site_no):
 
         area_m2 = drain_area_sqmi * SQMI_TO_M2
 
-        # Step 3: Set up temp directory
+        # Step 3: Set up temp directory and save fresh streamflow
         temp_site_dir = os.path.join(TEMP_DIR, site_no)
         os.makedirs(temp_site_dir, exist_ok=True)
-
-        # Save fresh streamflow to temp
         temp_streamflow_path = os.path.join(temp_site_dir, f"{site_no}.csv")
         fresh_df.to_csv(temp_streamflow_path, index=False)
 
@@ -684,7 +764,6 @@ def run_update_processing(site_no):
             'stage': 'calibrating', 'progress': 15,
             'message': f'Calibrating on {n_records:,} records... This may take ~90 seconds.',
         })
-
         bf_params, bff = calibrate_site(site_no, temp_streamflow_path, area_m2)
         if bf_params is None:
             processing_status[status_key].update({
@@ -694,15 +773,15 @@ def run_update_processing(site_no):
             })
             return
 
-        # Save params/bff in temp
-        temp_params_path = os.path.join(temp_site_dir, f"params_{site_no}.csv")
-        temp_bff_path = os.path.join(temp_site_dir, f"bff_{site_no}.csv")
-        bf_params.to_csv(temp_params_path, index=False, float_format='%.6g')
-        bff.to_csv(temp_bff_path, index=False, float_format='%.6g')
+        # Save new params/bff to temp
+        bf_params.to_csv(os.path.join(temp_site_dir, f"params_{site_no}.csv"),
+                         index=False, float_format='%.6g')
+        bff.to_csv(os.path.join(temp_site_dir, f"bff_{site_no}.csv"),
+                   index=False, float_format='%.6g')
 
         processing_status[status_key].update({
             'stage': 'done', 'progress': 100,
-            'message': f'Updated calibration complete! ({n_records:,} records, area: {drain_area_sqmi:.1f} mi²). Charts will be generated on view.',
+            'message': f'Recalibration complete! ({n_records:,} records, area: {drain_area_sqmi:.1f} mi²).',
             'done': True,
             'drain_area_sqmi': drain_area_sqmi,
             'n_records': n_records,
@@ -712,7 +791,7 @@ def run_update_processing(site_no):
         traceback.print_exc()
         processing_status[status_key].update({
             'stage': 'error', 'progress': 0,
-            'message': f'Update error: {str(e)}', 'error': str(e), 'done': True,
+            'message': f'Recalibration error: {str(e)}', 'error': str(e), 'done': True,
         })
 
 
@@ -720,7 +799,12 @@ def run_update_processing(site_no):
 def api_gage_progress(site_no):
     """SSE endpoint for real-time progress updates."""
     source = request.args.get('source', 'original')
-    status_key = f"update_{site_no}" if source == 'updated' else site_no
+    if source == 'updated':
+        status_key = f"update_{site_no}"
+    elif source == 'recalibrated':
+        status_key = f"recalibrate_{site_no}"
+    else:
+        status_key = site_no
 
     def generate():
         while True:
