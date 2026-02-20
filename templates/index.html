@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseflow Analyst</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- MarkerCluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; height: 100vh; }
+
+        /* Layout */
+        #app { display: flex; height: 100vh; }
+        #map { flex: 1; height: 100%; z-index: 1; }
+        #panel {
+            width: 480px;
+            height: 100%;
+            background: #fff;
+            box-shadow: -2px 0 12px rgba(0,0,0,0.15);
+            display: none;
+            flex-direction: column;
+            z-index: 2;
+            overflow: hidden;
+        }
+        #panel.open { display: flex; }
+
+        /* Panel header */
+        .panel-header {
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #1a73e8, #0d47a1);
+            color: white;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .panel-header h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; padding-right: 30px; }
+        .panel-header .subtitle { font-size: 12px; opacity: 0.85; }
+        .close-btn {
+            position: absolute; top: 12px; right: 14px;
+            background: rgba(255,255,255,0.2); border: none; color: white;
+            width: 28px; height: 28px; border-radius: 50%;
+            cursor: pointer; font-size: 18px; line-height: 28px; text-align: center;
+        }
+        .close-btn:hover { background: rgba(255,255,255,0.35); }
+
+        /* Panel body */
+        .panel-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+
+        /* Info card */
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+        .info-item { background: #f8f9fa; padding: 10px 12px; border-radius: 8px; }
+        .info-item .label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-item .value { font-size: 14px; font-weight: 600; color: #333; margin-top: 2px; }
+
+        /* Status badge */
+        .status-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
+        .status-ready { background: #e8f5e9; color: #2e7d32; }
+        .status-calibrated { background: #e3f2fd; color: #1565c0; }
+        .status-pending { background: #fff3e0; color: #e65100; }
+
+        /* Buttons */
+        .btn-row { display: flex; gap: 8px; margin-bottom: 16px; }
+        .action-btn {
+            flex: 1; padding: 12px;
+            border: none; border-radius: 10px;
+            font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: opacity 0.2s;
+        }
+        .action-btn:hover { opacity: 0.88; }
+        .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn-primary { background: linear-gradient(135deg, #1a73e8, #0d47a1); color: white; }
+        .btn-update { background: linear-gradient(135deg, #00897b, #004d40); color: white; }
+
+        /* Progress section */
+        .progress-section { background: #f8f9fa; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .progress-bar-container { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #1a73e8, #42a5f5); border-radius: 4px; transition: width 0.5s ease; width: 0%; }
+        .progress-message { font-size: 13px; color: #555; margin-bottom: 6px; }
+        .progress-timer { font-size: 22px; font-weight: 700; color: #1a73e8; text-align: center; margin-top: 8px; }
+        .progress-timer-label { font-size: 11px; color: #888; text-align: center; }
+
+        /* Tab bar for Original vs Updated results */
+        .tab-bar { display: flex; gap: 0; margin-bottom: 16px; border-radius: 8px; overflow: hidden; border: 2px solid #e0e0e0; }
+        .tab-btn {
+            flex: 1; padding: 10px; text-align: center;
+            font-size: 13px; font-weight: 600;
+            border: none; cursor: pointer;
+            background: #f5f5f5; color: #666;
+            transition: all 0.2s;
+        }
+        .tab-btn.active { background: #1a73e8; color: white; }
+        .tab-btn:hover:not(.active) { background: #e8e8e8; }
+
+        /* Plot containers */
+        .plot-container { margin-bottom: 20px; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); background: #fff; }
+        .plot-header {
+            padding: 10px 14px; font-size: 13px; font-weight: 600; color: #444;
+            background: #f8f9fa; border-bottom: 1px solid #eee;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .plot-header .plot-actions { display: flex; align-items: center; gap: 8px; }
+        .plot-header .plot-hint { font-size: 11px; color: #999; font-weight: 400; }
+        .expand-btn {
+            background: none; border: 1px solid #ddd; border-radius: 5px;
+            cursor: pointer; padding: 3px 6px; color: #666; font-size: 12px;
+            display: flex; align-items: center; gap: 4px; transition: all 0.15s;
+        }
+        .expand-btn:hover { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
+        .expand-btn svg { width: 14px; height: 14px; }
+        .plot-div { width: 100%; }
+
+        /* Fullscreen overlay */
+        .fs-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.97); z-index: 10000;
+            flex-direction: column;
+        }
+        .fs-overlay.active { display: flex; }
+        .fs-header {
+            padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px solid #e0e0e0; flex-shrink: 0;
+        }
+        .fs-title { font-size: 16px; font-weight: 600; color: #333; }
+        .fs-close {
+            background: none; border: 1px solid #ddd; border-radius: 6px;
+            cursor: pointer; padding: 6px 14px; font-size: 13px; color: #555;
+            display: flex; align-items: center; gap: 6px; transition: all 0.15s;
+        }
+        .fs-close:hover { background: #fce4ec; border-color: #c62828; color: #c62828; }
+        .fs-body { flex: 1; padding: 8px; }
+
+        /* Drought badge */
+        .drought-badge { display: inline-block; padding: 5px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; margin-bottom: 10px; }
+        .drought-none { background: #e8f5e9; color: #2e7d32; }
+        .drought-d0 { background: #ffff00; color: #333; }
+        .drought-d1 { background: #fcd37f; color: #333; }
+        .drought-d2 { background: #ffaa00; color: #333; }
+        .drought-d3 { background: #e60000; color: #fff; }
+        .drought-d4 { background: #730000; color: #fff; }
+        .btn-drought { background: linear-gradient(135deg, #ef6c00, #bf360c); color: white; }
+        .btn-anomaly { background: linear-gradient(135deg, #5c6bc0, #283593); color: white; }
+
+        /* Anomaly cards */
+        .anomaly-list { margin-bottom: 16px; }
+        .anomaly-card {
+            background: #f8f9fa; border-radius: 10px; padding: 12px 14px;
+            margin-bottom: 10px; border-left: 4px solid #999;
+            font-size: 13px; line-height: 1.5; color: #444;
+        }
+        .anomaly-card.low-flow { border-left-color: #e53935; }
+        .anomaly-card.high-flow { border-left-color: #1e88e5; }
+        .anomaly-card-header {
+            display: flex; align-items: center; gap: 8px;
+            font-weight: 700; font-size: 13px; margin-bottom: 6px;
+        }
+        .anomaly-icon { font-size: 16px; }
+        .anomaly-dates { font-size: 11px; color: #888; font-weight: 400; }
+        .anomaly-drought { margin-top: 6px; }
+
+        /* Error */
+        .error-msg { background: #fce4ec; color: #c62828; padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+
+        /* Loading spinner */
+        .loading { text-align: center; padding: 40px; color: #888; }
+        .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid #e0e0e0; border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Selected gage star marker */
+        .selected-star {
+            background: none !important;
+            border: none !important;
+        }
+        .selected-star .star-inner {
+            display: flex; align-items: center; justify-content: center;
+            animation: star-pulse 1.2s ease-in-out infinite;
+            filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.9)) drop-shadow(0 0 12px rgba(255, 165, 0, 0.5));
+        }
+        @keyframes star-pulse {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.9)) drop-shadow(0 0 12px rgba(255, 165, 0, 0.5)); }
+            50% { transform: scale(1.25); filter: drop-shadow(0 0 10px rgba(255, 215, 0, 1)) drop-shadow(0 0 18px rgba(255, 165, 0, 0.7)); }
+        }
+
+        /* Map legend */
+        .legend { background: white; padding: 10px 14px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 13px; line-height: 1.8; }
+        .legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+        .legend-divider { border: none; border-top: 1px solid #e0e0e0; margin: 6px 0; }
+        .toggle-row { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+        .toggle-switch {
+            position: relative; width: 34px; height: 18px; background: #ccc; border-radius: 9px;
+            transition: background 0.2s; flex-shrink: 0;
+        }
+        .toggle-switch.on { background: #1a73e8; }
+        .toggle-switch::after {
+            content: ''; position: absolute; top: 2px; left: 2px;
+            width: 14px; height: 14px; background: white; border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .toggle-switch.on::after { transform: translateX(16px); }
+
+        /* Layer switcher */
+        .layer-control { background: white; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 12px; }
+        .layer-control label { display: block; cursor: pointer; padding: 3px 0; }
+        .layer-control input { margin-right: 6px; }
+
+        /* Plotly overrides for better look */
+        .js-plotly-plot .plotly .modebar { top: 4px !important; right: 4px !important; }
+
+        /* Search box */
+        .search-control {
+            position: relative;
+        }
+        .search-wrap {
+            position: relative;
+            width: 300px;
+        }
+        .search-icon {
+            position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+            width: 16px; height: 16px; pointer-events: none; opacity: 0.4;
+        }
+        .search-input {
+            width: 100%;
+            padding: 10px 12px 10px 34px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            outline: none;
+        }
+        .search-input::placeholder { color: #aaa; }
+        .search-input:focus { box-shadow: 0 2px 12px rgba(26,115,232,0.35); }
+        .search-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0; right: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+            overflow: hidden;
+            display: none;
+            z-index: 10000;
+        }
+        .search-dropdown.visible { display: block; }
+        .search-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.15s;
+        }
+        .search-item:last-child { border-bottom: none; }
+        .search-item:hover, .search-item.active { background: #e8f0fe; }
+        .search-item-dot {
+            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+        }
+        .search-item-text { flex: 1; min-width: 0; }
+        .search-item-id { font-weight: 700; font-size: 14px; color: #222; }
+        .search-item-name { font-size: 11px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .search-item-state {
+            flex-shrink: 0;
+            font-size: 11px; font-weight: 700;
+            color: #fff; background: #78909c;
+            padding: 2px 7px; border-radius: 4px;
+        }
+        .search-no-results { padding: 12px 14px; color: #999; font-size: 13px; text-align: center; }
+    </style>
+</head>
+<body>
+    <!-- Fullscreen plot overlay -->
+    <div class="fs-overlay" id="fs-overlay">
+        <div class="fs-header">
+            <div class="fs-title" id="fs-title"></div>
+            <button class="fs-close" onclick="closeFullscreen()">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                Close (Esc)
+            </button>
+        </div>
+        <div class="fs-body" id="fs-body"></div>
+    </div>
+
+    <div id="app">
+        <div id="map"></div>
+        <div id="panel">
+            <div class="panel-header">
+                <button class="close-btn" onclick="closePanel()">&times;</button>
+                <h2 id="panel-title">Gage Details</h2>
+                <div class="subtitle" id="panel-subtitle"></div>
+            </div>
+            <div class="panel-body" id="panel-body"></div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- MarkerCluster JS -->
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <!-- Plotly.js for interactive charts -->
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
+
+    <script>
+        // ===== State =====
+        let map, clusterGroup, rawGroup;
+        let allGages = [];
+        let allMarkers = [];
+        let clusteringEnabled = true;
+        let filterRefOnly = false;
+        let filterNaturalOnly = false;
+        let filterLowFlowOnly = false;
+        let markerMap = {};
+        let selectedSite = null;
+        let selectedStarMarker = null;
+        let countdownInterval = null;
+        let eventSource = null;
+        let currentDataSource = 'original';  // 'original' or 'updated'
+        let hasUpdatedResults = {};  // site_no -> bool
+
+        // ===== Plotly layout defaults =====
+        const plotlyConfig = {
+            responsive: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
+            displaylogo: false,
+            scrollZoom: true,
+        };
+        const layoutDefaults = {
+            font: { family: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif', size: 11 },
+            margin: { l: 55, r: 20, t: 35, b: 45 },
+            paper_bgcolor: '#fff',
+            plot_bgcolor: '#fafafa',
+            xaxis: { gridcolor: '#e8e8e8', zeroline: false },
+            yaxis: { gridcolor: '#e8e8e8', zeroline: false },
+            hovermode: 'x unified',
+            legend: { orientation: 'h', y: -0.18, x: 0.5, xanchor: 'center', font: { size: 10 } },
+        };
+
+        // ===== Map Setup =====
+        function initMap() {
+            map = L.map('map', {
+                center: [39.8, -98.5],
+                zoom: 4,
+                zoomControl: true,
+            });
+
+            // Tile layers
+            // Default: Stadia Stamen Terrain - clean with rivers/terrain, minimal city clutter
+            const terrain = L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; Stadia Maps &copy; Stamen Design &copy; OpenMapTiles &copy; OpenStreetMap',
+                maxZoom: 18,
+            });
+            // Esri World Hydro Reference - overlay showing rivers/water bodies only
+            const hydroRef = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Reference_Overlay/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri', maxZoom: 18, opacity: 1,
+            });
+            // Light plain base for a clean rivers-only look
+            const cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; CARTO &copy; OpenStreetMap', maxZoom: 19,
+            });
+            // Combine: plain light base + hydro overlay = rivers stand out
+            const riversClean = L.layerGroup([cartoLight, hydroRef]);
+
+            const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri', maxZoom: 18,
+            });
+            const openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenTopoMap', maxZoom: 17,
+            });
+
+            // Default to Rivers Only (clean light base + hydro overlay)
+            riversClean.addTo(map);
+
+            // Layer control
+            L.control.layers({
+                'Rivers Only': riversClean,
+                'Terrain': terrain,
+                'Topographic': openTopo,
+                'Satellite': satellite,
+            }, null, { position: 'topright', collapsed: true }).addTo(map);
+
+            // Search control
+            const searchControl = L.control({ position: 'topleft' });
+            searchControl.onAdd = function() {
+                const div = L.DomUtil.create('div', 'search-control');
+                div.innerHTML = `
+                    <div class="search-wrap">
+                        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+                        <input class="search-input" id="gage-search" type="text" placeholder="Search gage number or name..." autocomplete="off" />
+                        <div class="search-dropdown" id="search-dropdown"></div>
+                    </div>
+                `;
+                // Prevent map drag/zoom when interacting with search
+                L.DomEvent.disableClickPropagation(div);
+                L.DomEvent.disableScrollPropagation(div);
+                return div;
+            };
+            searchControl.addTo(map);
+
+            // Legend + clustering toggle
+            const legend = L.control({ position: 'bottomleft' });
+            legend.onAdd = function() {
+                const div = L.DomUtil.create('div', 'legend');
+                div.innerHTML = `
+                    <b>Gage Status</b><br>
+                    <span class="legend-dot" style="background:#2e7d32;"></span> Calibrated<br>
+                    <span class="legend-dot" style="background:#e65100;"></span> Not Calibrated
+                    <hr class="legend-divider">
+                    <div class="toggle-row" onclick="toggleClustering()">
+                        <span class="toggle-switch on" id="cluster-toggle"></span>
+                        <span>Group markers</span>
+                    </div>
+                    <div class="toggle-row" onclick="toggleRefOnly()">
+                        <span class="toggle-switch" id="ref-toggle"></span>
+                        <span>Reference only</span>
+                    </div>
+                    <div class="toggle-row" onclick="toggleNaturalOnly()">
+                        <span class="toggle-switch" id="natural-toggle"></span>
+                        <span>Natural only</span>
+                    </div>
+                    <div class="toggle-row" onclick="toggleLowFlowOnly()">
+                        <span class="toggle-switch" id="lowflow-toggle"></span>
+                        <span>Low flow</span>
+                    </div>
+                `;
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+            legend.addTo(map);
+
+            // MarkerCluster group
+            clusterGroup = L.markerClusterGroup({
+                maxClusterRadius: 50,
+                spiderfyOnMaxZoom: true,
+                showCoverageOnHover: false,
+                chunkedLoading: true,
+                chunkInterval: 100,
+                chunkDelay: 10,
+            });
+            rawGroup = L.layerGroup();
+            map.addLayer(clusterGroup);
+        }
+
+        // ===== Load Gages =====
+        async function loadGages() {
+            const resp = await fetch('/api/gages');
+            allGages = await resp.json();
+            allMarkers = [];
+            for (const gage of allGages) {
+                const isCalibrated = gage.status === 'calibrated';
+                const color = isCalibrated ? '#2e7d32' : '#e65100';
+                const marker = L.circleMarker([gage.lat, gage.lng], {
+                    radius: 6, fillColor: color, color: '#fff',
+                    weight: 1.5, opacity: 1, fillOpacity: 0.85,
+                });
+                marker.bindTooltip(`<b>${gage.site_no}</b><br>${gage.name}`, { direction: 'top', offset: [0, -8] });
+                marker.on('click', () => openPanel(gage.site_no));
+                marker.siteNo = gage.site_no;
+                markerMap[gage.site_no] = marker;
+                allMarkers.push(marker);
+            }
+            clusterGroup.addLayers(allMarkers);
+        }
+
+        function getFilteredMarkers() {
+            return allMarkers.filter(m => {
+                const gage = allGages.find(g => g.site_no === m.siteNo);
+                if (!gage) return false;
+                if (filterRefOnly && gage.ref_status !== 'Ref') return false;
+                if (filterNaturalOnly && gage.behavior !== 'Natural') return false;
+                if (filterLowFlowOnly && !gage.has_lowflow) return false;
+                return true;
+            });
+        }
+
+        function refreshMarkers() {
+            const filtered = getFilteredMarkers();
+            // Remove both layers first, then add back the active one
+            map.removeLayer(clusterGroup);
+            map.removeLayer(rawGroup);
+            clusterGroup.clearLayers();
+            rawGroup.clearLayers();
+            if (clusteringEnabled) {
+                clusterGroup.addLayers(filtered);
+                map.addLayer(clusterGroup);
+            } else {
+                for (const m of filtered) rawGroup.addLayer(m);
+                map.addLayer(rawGroup);
+            }
+        }
+
+        function toggleClustering() {
+            const toggle = document.getElementById('cluster-toggle');
+            clusteringEnabled = !clusteringEnabled;
+            toggle.classList.toggle('on');
+            refreshMarkers();
+        }
+
+        function toggleRefOnly() {
+            const toggle = document.getElementById('ref-toggle');
+            filterRefOnly = !filterRefOnly;
+            toggle.classList.toggle('on');
+            refreshMarkers();
+        }
+
+        function toggleNaturalOnly() {
+            const toggle = document.getElementById('natural-toggle');
+            filterNaturalOnly = !filterNaturalOnly;
+            toggle.classList.toggle('on');
+            refreshMarkers();
+        }
+
+        function toggleLowFlowOnly() {
+            const toggle = document.getElementById('lowflow-toggle');
+            filterLowFlowOnly = !filterLowFlowOnly;
+            toggle.classList.toggle('on');
+            refreshMarkers();
+        }
+
+        // ===== Panel =====
+        function openPanel(siteNo) {
+            // Remove previous star marker
+            removeStarMarker();
+            selectedSite = siteNo;
+            currentDataSource = 'original';
+            cleanupProgress();
+
+            // Add a shining star on the selected gage
+            const gage = allGages.find(g => g.site_no === siteNo);
+            if (gage) {
+                addStarMarker(gage.lat, gage.lng);
+            }
+            document.getElementById('panel').classList.add('open');
+            map.invalidateSize();
+            document.getElementById('panel-body').innerHTML = '<div class="loading"><span class="spinner"></span> Loading gage info...</div>';
+            loadGageDetails(siteNo);
+        }
+
+        function closePanel() {
+            cleanupProgress();
+            removeStarMarker();
+            document.getElementById('panel').classList.remove('open');
+            selectedSite = null;
+            map.invalidateSize();
+        }
+
+        async function loadGageDetails(siteNo) {
+            const resp = await fetch(`/api/gage/${siteNo}/info`);
+            const info = await resp.json();
+
+            document.getElementById('panel-title').textContent = info.name || `Gage ${siteNo}`;
+            document.getElementById('panel-subtitle').textContent = `USGS ${siteNo}`;
+
+            let statusClass, statusText;
+            switch (info.status) {
+                case 'calibrated': statusClass = 'status-ready'; statusText = 'Calibrated'; break;
+                default: statusClass = 'status-pending'; statusText = 'Not Calibrated'; break;
+            }
+
+            let html = `
+                <span class="status-badge ${statusClass}">${statusText}</span>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="label">Latitude</div>
+                        <div class="value">${info.lat.toFixed(4)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Longitude</div>
+                        <div class="value">${info.lng.toFixed(4)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Drainage Area</div>
+                        <div class="value">${info.drain_area_sqmi ? info.drain_area_sqmi.toLocaleString() + ' mi&sup2;' : 'N/A'}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Site ID</div>
+                        <div class="value">${siteNo}</div>
+                    </div>
+            `;
+            if (info.river_behavior) {
+                const behaviorColor = info.river_behavior === 'Natural' ? '#4CAF50' : '#FF9800';
+                html += `
+                    <div class="info-item">
+                        <div class="label">River Behavior</div>
+                        <div class="value" style="color:${behaviorColor};font-weight:600">${info.river_behavior}</div>
+                    </div>
+                `;
+            }
+            if (info.ref_status) {
+                const refColor = info.ref_status === 'Ref' ? '#2196F3' : '#9E9E9E';
+                const refLabel = info.ref_status === 'Ref' ? 'Reference' : 'Non-reference';
+                html += `
+                    <div class="info-item">
+                        <div class="label">GAGES-II Class</div>
+                        <div class="value" style="color:${refColor};font-weight:600">${refLabel}</div>
+                    </div>
+                `;
+            }
+            if (info.river_behavior) {
+                html += `
+                    <div class="info-item">
+                        <div class="label">NWM ID</div>
+                        <div class="value">${info.nwm_id}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Stream Order</div>
+                        <div class="value">${info.stream_order != null ? info.stream_order : 'N/A'}</div>
+                    </div>
+                `;
+            }
+            if (info.bff !== undefined) {
+                html += `
+                    <div class="info-item">
+                        <div class="label">Baseflow Fraction</div>
+                        <div class="value">${(info.bff * 100).toFixed(1)}%</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Surface Flow</div>
+                        <div class="value">${(info.sff * 100).toFixed(1)}%</div>
+                    </div>
+                `;
+            }
+            html += `</div>`;
+
+            // Action buttons
+            html += `<div class="btn-row">`;
+            if (info.status !== 'calibrated') {
+                html += `<button class="action-btn btn-primary" id="process-btn" onclick="startProcessing('${siteNo}')">Calibrate</button>`;
+            }
+            html += `<button class="action-btn btn-update" id="update-btn" onclick="startUpdate('${siteNo}')">Update Data</button>`;
+            html += `</div>`;
+
+            // Drought section
+            html += `<div id="drought-container">
+                <button class="action-btn btn-drought" style="width:100%;margin-bottom:16px" onclick="loadDrought('${siteNo}')">Load Drought Conditions</button>
+            </div>`;
+
+            // Anomaly section (for calibrated gages)
+            if (info.status === 'calibrated') {
+                html += `<div id="anomaly-container">
+                    <button class="action-btn btn-anomaly" style="width:100%;margin-bottom:16px" onclick="loadAnomalies('${siteNo}')">Detect Flow Anomalies</button>
+                </div>`;
+            }
+
+            // Progress area
+            html += `<div id="progress-container"></div>`;
+
+            // Tab bar (shown when updated results exist)
+            html += `<div id="tab-container" style="display:none;"></div>`;
+
+            // Plots area
+            html += `<div id="plots-container"></div>`;
+
+            document.getElementById('panel-body').innerHTML = html;
+
+            // If calibrated, load interactive plots (BFS runs on-the-fly)
+            if (info.status === 'calibrated') {
+                loadInteractivePlots(siteNo, 'original');
+            }
+
+            // Check if updated results exist too
+            if (hasUpdatedResults[siteNo]) {
+                showTabBar(siteNo);
+            }
+        }
+
+        // ===== Tab Bar for Original vs Updated =====
+        function showTabBar(siteNo) {
+            const container = document.getElementById('tab-container');
+            container.style.display = 'block';
+            container.innerHTML = `
+                <div class="tab-bar">
+                    <button class="tab-btn ${currentDataSource === 'original' ? 'active' : ''}" onclick="switchSource('${siteNo}', 'original')">Original Data</button>
+                    <button class="tab-btn ${currentDataSource === 'updated' ? 'active' : ''}" onclick="switchSource('${siteNo}', 'updated')">Updated Data</button>
+                </div>
+            `;
+        }
+
+        function switchSource(siteNo, source) {
+            currentDataSource = source;
+            showTabBar(siteNo);
+            loadInteractivePlots(siteNo, source);
+        }
+
+        // ===== Interactive Plots (Plotly) =====
+        // Store last-rendered chart specs so we can re-render in fullscreen
+        let chartRegistry = {};  // plotId -> { traces, layout }
+        let lastPlotData = null;
+        let lastPlotSiteNo = null;
+
+        const expandSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>';
+
+        async function loadInteractivePlots(siteNo, source) {
+            const container = document.getElementById('plots-container');
+            container.innerHTML = '<div class="loading"><span class="spinner"></span> Loading interactive charts...</div>';
+            chartRegistry = {};
+
+            try {
+                const resp = await fetch(`/api/gage/${siteNo}/data?source=${source}`);
+                const data = await resp.json();
+                if (!resp.ok || data.error) {
+                    container.innerHTML = `<div class="error-msg">${data.error || 'No data available for this source.'}</div>`;
+                    return;
+                }
+                lastPlotData = data;
+                lastPlotSiteNo = siteNo;
+                renderAllPlots(data, siteNo, container);
+            } catch (e) {
+                container.innerHTML = `<div class="error-msg">Failed to load data: ${e.message}</div>`;
+            }
+        }
+
+        function plotHeader(title, plotId, hint) {
+            return `<div class="plot-header">
+                <span>${title}</span>
+                <div class="plot-actions">
+                    ${hint ? `<span class="plot-hint">${hint}</span>` : ''}
+                    <button class="expand-btn" onclick="openFullscreen('${plotId}', '${title}')" title="Open fullscreen">
+                        ${expandSvg} Expand
+                    </button>
+                </div>
+            </div>`;
+        }
+
+        function renderAllPlots(data, siteNo, container) {
+            const hint = 'Scroll to zoom, drag to pan';
+            container.innerHTML = `
+                <div class="plot-container">
+                    ${plotHeader('Baseflow Separation', 'plot-bfs', hint)}
+                    <div class="plot-div" id="plot-bfs"></div>
+                </div>
+                <div class="plot-container">
+                    ${plotHeader('Flow Component Fractions', 'plot-pie', '')}
+                    <div class="plot-div" id="plot-pie"></div>
+                </div>
+                <div class="plot-container">
+                    ${plotHeader('Annual Baseflow Index', 'plot-bfi', hint)}
+                    <div class="plot-div" id="plot-bfi"></div>
+                </div>
+                ${data.bf_chapman ? `
+                <div class="plot-container">
+                    ${plotHeader('Method Comparison', 'plot-cmp', hint)}
+                    <div class="plot-div" id="plot-cmp"></div>
+                </div>` : ''}
+                ${data.ci_lower ? `
+                <div class="plot-container">
+                    ${plotHeader('Confidence Intervals', 'plot-ci', hint)}
+                    <div class="plot-div" id="plot-ci"></div>
+                </div>` : ''}
+                ${data.forecast_dates ? `
+                <div class="plot-container">
+                    ${plotHeader('Baseflow Forecast (90 days)', 'plot-fc', hint)}
+                    <div class="plot-div" id="plot-fc"></div>
+                </div>` : ''}
+            `;
+
+            // Wait for DOM, then render
+            setTimeout(() => {
+                renderBaseflowSeparation(data, siteNo);
+                renderPieChart(data, siteNo);
+                renderAnnualBFI(data, siteNo);
+                if (data.bf_chapman) renderMethodComparison(data, siteNo);
+                if (data.ci_lower) renderConfidenceIntervals(data, siteNo);
+                if (data.forecast_dates) renderForecast(data, siteNo);
+            }, 50);
+        }
+
+        // Fullscreen
+        function openFullscreen(plotId, title) {
+            const overlay = document.getElementById('fs-overlay');
+            const body = document.getElementById('fs-body');
+            document.getElementById('fs-title').textContent = title + ' - ' + lastPlotSiteNo;
+            body.innerHTML = '<div id="fs-plot" style="width:100%;height:100%;"></div>';
+            overlay.classList.add('active');
+
+            const reg = chartRegistry[plotId];
+            if (reg) {
+                // Wait for layout to settle, then measure the actual pixel dimensions
+                setTimeout(() => {
+                    const plotHeight = body.clientHeight - 16; // subtract padding
+                    const plotWidth = body.clientWidth - 16;
+                    const fsLayout = {
+                        ...reg.layout,
+                        height: plotHeight,
+                        width: plotWidth,
+                        margin: { l: 70, r: 40, t: 50, b: 60 },
+                        font: { ...reg.layout.font, size: 13 },
+                        title: { ...reg.layout.title, font: { size: 16 } },
+                    };
+                    // Remove rangeslider in fullscreen (more space)
+                    if (fsLayout.xaxis && fsLayout.xaxis.rangeslider) {
+                        fsLayout.xaxis = { ...fsLayout.xaxis, rangeslider: { visible: false } };
+                    }
+                    Plotly.newPlot('fs-plot', reg.traces, fsLayout, {
+                        ...plotlyConfig, responsive: true,
+                    });
+                }, 100);
+            }
+        }
+
+        function closeFullscreen() {
+            const overlay = document.getElementById('fs-overlay');
+            overlay.classList.remove('active');
+            const fsPlot = document.getElementById('fs-plot');
+            if (fsPlot) Plotly.purge('fs-plot');
+        }
+
+        // Helper: render + register a chart for fullscreen
+        function renderChart(id, traces, layout, config) {
+            chartRegistry[id] = { traces, layout };
+            Plotly.newPlot(id, traces, layout, config || plotlyConfig);
+        }
+
+        function renderBaseflowSeparation(data, siteNo) {
+            const traces = [
+                { x: data.dates, y: data.qob, name: 'Observed', type: 'scatter', mode: 'lines', line: { color: '#333', width: 1 } },
+                { x: data.dates, y: data.baseflow, name: 'Baseflow', type: 'scatter', mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(33,150,243,0.35)', line: { color: '#2196F3', width: 1 } },
+                { x: data.dates, y: data.surface_flow.map((v,i) => v + data.baseflow[i]), name: 'Surface Flow', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(76,175,80,0.3)', line: { color: '#4CAF50', width: 0.5 } },
+                { x: data.dates, y: data.direct_runoff.map((v,i) => v + data.surface_flow[i] + data.baseflow[i]), name: 'Direct Runoff', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(255,152,0,0.25)', line: { color: '#FF9800', width: 0.5 } },
+            ];
+            renderChart('plot-bfs', traces, {
+                ...layoutDefaults,
+                title: { text: `Baseflow Separation - ${siteNo}`, font: { size: 13 } },
+                xaxis: { ...layoutDefaults.xaxis, title: 'Date', rangeslider: { visible: true, thickness: 0.06 } },
+                yaxis: { ...layoutDefaults.yaxis, title: 'Flow (m\u00b3/s)', rangemode: 'tozero' },
+                height: 380,
+            });
+        }
+
+        function renderPieChart(data, siteNo) {
+            if (data.bff === undefined) return;
+            const traces = [{
+                values: [data.bff, data.sff, data.drf],
+                labels: ['Baseflow', 'Surface Flow', 'Direct Runoff'],
+                type: 'pie', marker: { colors: ['#2196F3', '#4CAF50', '#FF9800'] },
+                textinfo: 'label+percent', textposition: 'inside',
+                hoverinfo: 'label+percent+value', hole: 0.35, textfont: { size: 12 },
+            }];
+            const layout = {
+                ...layoutDefaults,
+                title: { text: `Flow Fractions - ${siteNo}`, font: { size: 13 } },
+                height: 300, showlegend: false,
+                margin: { l: 20, r: 20, t: 40, b: 20 },
+            };
+            renderChart('plot-pie', traces, layout, { ...plotlyConfig, displayModeBar: false });
+        }
+
+        function renderAnnualBFI(data, siteNo) {
+            const colors = data.annual_bfi.map(v => v >= data.mean_bfi ? '#2196F3' : '#90CAF9');
+            const traces = [
+                { x: data.annual_years, y: data.annual_bfi, type: 'bar', name: 'Annual BFI', marker: { color: colors, line: { color: '#1565C0', width: 0.5 } }, hovertemplate: 'Year: %{x}<br>BFI: %{y:.3f}<extra></extra>' },
+                { x: [data.annual_years[0], data.annual_years[data.annual_years.length - 1]], y: [data.mean_bfi, data.mean_bfi], type: 'scatter', mode: 'lines', name: `Mean BFI (${data.mean_bfi.toFixed(3)})`, line: { color: '#f44336', width: 2, dash: 'dash' } },
+            ];
+            renderChart('plot-bfi', traces, {
+                ...layoutDefaults,
+                title: { text: `Annual Baseflow Index - ${siteNo}`, font: { size: 13 } },
+                xaxis: { ...layoutDefaults.xaxis, title: 'Year', dtick: Math.max(1, Math.floor(data.annual_years.length / 12)) },
+                yaxis: { ...layoutDefaults.yaxis, title: 'BFI', range: [0, 1] },
+                height: 300, bargap: 0.15,
+            });
+        }
+
+        function renderMethodComparison(data, siteNo) {
+            const traces = [
+                { x: data.dates, y: data.qob, name: 'Observed Flow', type: 'scatter', mode: 'lines', line: { color: '#333', width: 1 } },
+                { x: data.dates, y: data.baseflow, name: 'PyBFS', type: 'scatter', mode: 'lines', line: { color: '#2196F3', width: 1.5 } },
+                { x: data.dates, y: data.bf_chapman, name: 'Chapman', type: 'scatter', mode: 'lines', line: { color: '#FF9800', width: 1.2, dash: 'dash' } },
+                { x: data.dates, y: data.bf_lh, name: 'Lyne & Hollick', type: 'scatter', mode: 'lines', line: { color: '#4CAF50', width: 1.2, dash: 'dash' } },
+                { x: data.dates, y: data.bf_eckhardt, name: 'Eckhardt', type: 'scatter', mode: 'lines', line: { color: '#9C27B0', width: 1.2, dash: 'dash' } },
+            ];
+            renderChart('plot-cmp', traces, {
+                ...layoutDefaults,
+                title: { text: `Baseflow Method Comparison - ${siteNo}`, font: { size: 13 } },
+                xaxis: { ...layoutDefaults.xaxis, title: 'Date', rangeslider: { visible: true, thickness: 0.06 } },
+                yaxis: { ...layoutDefaults.yaxis, title: 'Flow (m\u00b3/s)', rangemode: 'tozero' },
+                height: 380,
+            });
+        }
+
+        function renderConfidenceIntervals(data, siteNo) {
+            const traces = [
+                { x: data.dates, y: data.ci_upper, name: '95% Upper', type: 'scatter', mode: 'lines', line: { width: 0 }, showlegend: false },
+                { x: data.dates, y: data.ci_lower, name: '90% Credible Interval', type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(33,150,243,0.18)', line: { width: 0 } },
+                { x: data.dates, y: data.qob, name: 'Observed', type: 'scatter', mode: 'lines', line: { color: '#333', width: 1 } },
+                { x: data.dates, y: data.baseflow, name: 'Baseflow', type: 'scatter', mode: 'lines', line: { color: '#2196F3', width: 1.5 } },
+            ];
+            renderChart('plot-ci', traces, {
+                ...layoutDefaults,
+                title: { text: `Credible Intervals - ${siteNo}`, font: { size: 13 } },
+                xaxis: { ...layoutDefaults.xaxis, title: 'Date', rangeslider: { visible: true, thickness: 0.06 } },
+                yaxis: { ...layoutDefaults.yaxis, title: 'Flow (m\u00b3/s)', rangemode: 'tozero' },
+                height: 350,
+            });
+        }
+
+        function renderForecast(data, siteNo) {
+            const nShow = Math.min(365, data.dates.length);
+            const startIdx = data.dates.length - nShow;
+            const trainDates = data.dates.slice(startIdx);
+            const trainQob = data.qob.slice(startIdx);
+            const trainBF = data.baseflow.slice(startIdx);
+            const fcStart = data.forecast_dates[0];
+            const traces = [
+                { x: trainDates, y: trainQob, name: 'Observed', type: 'scatter', mode: 'lines', line: { color: '#333', width: 1 } },
+                { x: trainDates, y: trainBF, name: 'Baseflow (training)', type: 'scatter', mode: 'lines', line: { color: '#2196F3', width: 1.5 } },
+                { x: data.forecast_dates, y: data.forecast_baseflow, name: 'Baseflow (forecast)', type: 'scatter', mode: 'lines', line: { color: '#2196F3', width: 2, dash: 'dash' } },
+            ];
+            renderChart('plot-fc', traces, {
+                ...layoutDefaults,
+                title: { text: `90-Day Baseflow Forecast - ${siteNo}`, font: { size: 13 } },
+                xaxis: { ...layoutDefaults.xaxis, title: 'Date' },
+                yaxis: { ...layoutDefaults.yaxis, title: 'Flow (m\u00b3/s)', rangemode: 'tozero' },
+                height: 350,
+                shapes: [{ type: 'line', x0: fcStart, x1: fcStart, y0: 0, y1: 1, yref: 'paper', line: { color: '#888', width: 1.5, dash: 'dot' } }],
+                annotations: [{ x: fcStart, y: 1, yref: 'paper', text: 'Forecast Start', showarrow: false, font: { size: 10, color: '#888' }, yanchor: 'bottom' }],
+            });
+        }
+
+        // ===== Drought Conditions =====
+        async function loadDrought(siteNo) {
+            const container = document.getElementById('drought-container');
+            container.innerHTML = '<div class="loading"><span class="spinner"></span> Fetching drought data...</div>';
+
+            try {
+                const resp = await fetch(`/api/gage/${siteNo}/drought`);
+                const data = await resp.json();
+                if (data.error) {
+                    container.innerHTML = `<div class="error-msg">${data.error}</div>`;
+                    return;
+                }
+                renderDroughtSection(data, siteNo, container);
+            } catch (e) {
+                container.innerHTML = `<div class="error-msg">Failed to load drought data: ${e.message}</div>`;
+            }
+        }
+
+        function renderDroughtSection(data, siteNo, container) {
+            // Determine badge class from current level
+            let badgeClass = 'drought-none';
+            const lvl = data.current_level;
+            if (lvl.startsWith('D4')) badgeClass = 'drought-d4';
+            else if (lvl.startsWith('D3')) badgeClass = 'drought-d3';
+            else if (lvl.startsWith('D2')) badgeClass = 'drought-d2';
+            else if (lvl.startsWith('D1')) badgeClass = 'drought-d1';
+            else if (lvl.startsWith('D0')) badgeClass = 'drought-d0';
+
+            container.innerHTML = `
+                <div style="margin-bottom:16px">
+                    <div style="font-size:12px;color:#666;margin-bottom:4px">Current Drought Status (County FIPS: ${data.fips})</div>
+                    <span class="drought-badge ${badgeClass}">${data.current_level}</span>
+                </div>
+                <div class="plot-container">
+                    ${plotHeader('Drought Severity Timeline (County)', 'plot-drought', 'Since 2000')}
+                    <div class="plot-div" id="plot-drought"></div>
+                </div>
+            `;
+
+            setTimeout(() => renderDroughtChart(data, siteNo), 50);
+        }
+
+        function renderDroughtChart(data, siteNo) {
+            // Format dates: USDM returns YYYYMMDD strings
+            const dates = data.dates.map(d => {
+                const s = String(d);
+                if (s.length === 8) return s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8);
+                return s;
+            });
+
+            const traces = [
+                { x: dates, y: data.D4, name: 'D4 Exceptional', stackgroup: 'one', fillcolor: '#730000', line: { width: 0, color: '#730000' } },
+                { x: dates, y: data.D3, name: 'D3 Extreme', stackgroup: 'one', fillcolor: '#e60000', line: { width: 0, color: '#e60000' } },
+                { x: dates, y: data.D2, name: 'D2 Severe', stackgroup: 'one', fillcolor: '#ffaa00', line: { width: 0, color: '#ffaa00' } },
+                { x: dates, y: data.D1, name: 'D1 Moderate', stackgroup: 'one', fillcolor: '#fcd37f', line: { width: 0, color: '#fcd37f' } },
+                { x: dates, y: data.D0, name: 'D0 Abnormally Dry', stackgroup: 'one', fillcolor: '#ffff00', line: { width: 0, color: '#ffff00' } },
+            ];
+
+            renderChart('plot-drought', traces, {
+                ...layoutDefaults,
+                title: { text: `Drought Severity - County ${data.fips}`, font: { size: 13 } },
+                xaxis: { ...layoutDefaults.xaxis, title: 'Date' },
+                yaxis: { ...layoutDefaults.yaxis, title: '% of County Area', range: [0, 100] },
+                height: 300,
+                legend: { ...layoutDefaults.legend, traceorder: 'reversed' },
+            });
+        }
+
+        // ===== Flow Anomaly Detection =====
+        async function loadAnomalies(siteNo) {
+            const container = document.getElementById('anomaly-container');
+            container.innerHTML = '<div class="loading"><span class="spinner"></span> Detecting flow anomalies...</div>';
+
+            try {
+                const resp = await fetch(`/api/gage/${siteNo}/anomalies`);
+                const data = await resp.json();
+                if (data.error) {
+                    container.innerHTML = `<div class="error-msg">${data.error}</div>`;
+                    return;
+                }
+                renderAnomalies(data.events, container);
+            } catch (e) {
+                container.innerHTML = `<div class="error-msg">Failed to detect anomalies: ${e.message}</div>`;
+            }
+        }
+
+        function renderAnomalies(events, container) {
+            if (!events || events.length === 0) {
+                container.innerHTML = '<div style="background:#f8f9fa;padding:12px;border-radius:8px;font-size:13px;color:#666;margin-bottom:16px">No significant flow anomalies detected in the record.</div>';
+                return;
+            }
+
+            let html = '<div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">Flow Anomalies (Top ' + events.length + ')</div>';
+            html += '<div class="anomaly-list">';
+            for (const ev of events) {
+                const isLow = ev.type === 'low_flow';
+                const icon = isLow ? '\u25BC' : '\u25B2';
+                const typeLabel = isLow ? 'Extreme Low Flow' : 'Extreme High Flow';
+                const cardClass = isLow ? 'low-flow' : 'high-flow';
+                const iconColor = isLow ? '#e53935' : '#1e88e5';
+
+                let droughtHtml = '';
+                if (ev.drought_level) {
+                    droughtHtml = `<div class="anomaly-drought"><span class="drought-badge drought-${ev.drought_level.toLowerCase()}">${ev.drought_level}</span></div>`;
+                }
+
+                html += `
+                    <div class="anomaly-card ${cardClass}">
+                        <div class="anomaly-card-header">
+                            <span class="anomaly-icon" style="color:${iconColor}">${icon}</span>
+                            <span>${typeLabel}</span>
+                            <span class="anomaly-dates">${ev.start_date} \u2014 ${ev.end_date} (${ev.duration} days)</span>
+                        </div>
+                        <div>${ev.narrative}</div>
+                        ${droughtHtml}
+                    </div>
+                `;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // ===== Processing (original data) =====
+        async function startProcessing(siteNo) {
+            const btn = document.getElementById('process-btn');
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+
+            const resp = await fetch(`/api/gage/${siteNo}/process`, { method: 'POST' });
+            const result = await resp.json();
+
+            if (result.error) {
+                document.getElementById('progress-container').innerHTML = `<div class="error-msg">${result.error}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Retry';
+                return;
+            }
+            if (result.status === 'already_done') { loadGageDetails(siteNo); return; }
+
+            btn.style.display = 'none';
+            startProgressTracking(siteNo, 'original');
+        }
+
+        // ===== Update Data (fresh USGS fetch) =====
+        async function startUpdate(siteNo) {
+            const btn = document.getElementById('update-btn');
+            btn.disabled = true;
+            btn.textContent = 'Fetching...';
+
+            const resp = await fetch(`/api/gage/${siteNo}/update`, { method: 'POST' });
+            const result = await resp.json();
+
+            if (result.error) {
+                document.getElementById('progress-container').innerHTML = `<div class="error-msg">${result.error}</div>`;
+                btn.disabled = false;
+                btn.textContent = 'Update Data';
+                return;
+            }
+
+            btn.style.display = 'none';
+            // Hide process btn too if exists
+            const pBtn = document.getElementById('process-btn');
+            if (pBtn) pBtn.style.display = 'none';
+
+            startProgressTracking(siteNo, 'updated');
+        }
+
+        // ===== Progress Tracking =====
+        function startProgressTracking(siteNo, source) {
+            let secondsLeft = source === 'updated' ? 130 : 100;
+
+            const container = document.getElementById('progress-container');
+            container.innerHTML = `
+                <div class="progress-section">
+                    <div class="progress-message" id="progress-msg">Initializing...</div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progress-bar"></div>
+                    </div>
+                    <div class="progress-timer" id="countdown">${formatTime(secondsLeft)}</div>
+                    <div class="progress-timer-label">Estimated time remaining</div>
+                </div>
+            `;
+
+            countdownInterval = setInterval(() => {
+                secondsLeft = Math.max(0, secondsLeft - 1);
+                const el = document.getElementById('countdown');
+                if (el) el.textContent = secondsLeft > 0 ? formatTime(secondsLeft) : 'Almost done...';
+            }, 1000);
+
+            const sourceParam = source === 'updated' ? '?source=updated' : '';
+            eventSource = new EventSource(`/api/gage/${siteNo}/progress${sourceParam}`);
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const msgEl = document.getElementById('progress-msg');
+                const barEl = document.getElementById('progress-bar');
+                if (msgEl) msgEl.textContent = data.message;
+                if (barEl) barEl.style.width = data.progress + '%';
+
+                if (data.done) {
+                    cleanupProgress();
+                    if (data.stage === 'done') {
+                        if (source === 'updated') {
+                            hasUpdatedResults[siteNo] = true;
+                            currentDataSource = 'updated';
+                            // Reload panel to show tabs
+                            loadGageDetails(siteNo);
+                            // After panel reloads, switch to updated tab
+                            setTimeout(() => {
+                                showTabBar(siteNo);
+                                loadInteractivePlots(siteNo, 'updated');
+                            }, 300);
+                        } else {
+                            updateMarkerColor(siteNo, '#2e7d32');
+                            const g = allGages.find(g => g.site_no === siteNo);
+                            if (g) g.status = 'calibrated';
+                            loadGageDetails(siteNo);
+                        }
+                    } else if (data.error) {
+                        document.getElementById('progress-container').innerHTML = `<div class="error-msg">${data.message}</div>`;
+                    }
+                }
+            };
+            eventSource.onerror = function() { cleanupProgress(); };
+        }
+
+        function cleanupProgress() {
+            if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+            if (eventSource) { eventSource.close(); eventSource = null; }
+        }
+
+        function updateMarkerColor(siteNo, color) {
+            const marker = markerMap[siteNo];
+            if (marker) marker.setStyle({ fillColor: color });
+        }
+
+        function addStarMarker(lat, lng) {
+            const starHtml = `<div class="star-inner"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="3" width="18" height="18" rx="2" fill="#FFD600" stroke="#FF8F00" stroke-width="1.5"/></svg></div>`;
+            const icon = L.divIcon({
+                html: starHtml,
+                className: 'selected-star',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
+            });
+            selectedStarMarker = L.marker([lat, lng], { icon: icon, interactive: false, zIndexOffset: 1000 });
+            selectedStarMarker.addTo(map);
+        }
+
+        function removeStarMarker() {
+            if (selectedStarMarker) {
+                map.removeLayer(selectedStarMarker);
+                selectedStarMarker = null;
+            }
+        }
+
+        function formatTime(s) {
+            const m = Math.floor(s / 60);
+            return m > 0 ? `${m}:${(s % 60).toString().padStart(2, '0')}` : `0:${(s % 60).toString().padStart(2, '0')}`;
+        }
+
+        // ===== Search =====
+        // Full state name -> abbreviation mapping
+        const STATE_NAME_TO_ABBR = {
+            'ALABAMA':'AL','ALASKA':'AK','ARIZONA':'AZ','ARKANSAS':'AR','CALIFORNIA':'CA',
+            'COLORADO':'CO','CONNECTICUT':'CT','DELAWARE':'DE','FLORIDA':'FL','GEORGIA':'GA',
+            'HAWAII':'HI','IDAHO':'ID','ILLINOIS':'IL','INDIANA':'IN','IOWA':'IA',
+            'KANSAS':'KS','KENTUCKY':'KY','LOUISIANA':'LA','MAINE':'ME','MARYLAND':'MD',
+            'MASSACHUSETTS':'MA','MICHIGAN':'MI','MINNESOTA':'MN','MISSISSIPPI':'MS',
+            'MISSOURI':'MO','MONTANA':'MT','NEBRASKA':'NE','NEVADA':'NV',
+            'NEW HAMPSHIRE':'NH','NEW JERSEY':'NJ','NEW MEXICO':'NM','NEW YORK':'NY',
+            'NORTH CAROLINA':'NC','NORTH DAKOTA':'ND','OHIO':'OH','OKLAHOMA':'OK',
+            'OREGON':'OR','PENNSYLVANIA':'PA','RHODE ISLAND':'RI','SOUTH CAROLINA':'SC',
+            'SOUTH DAKOTA':'SD','TENNESSEE':'TN','TEXAS':'TX','UTAH':'UT','VERMONT':'VT',
+            'VIRGINIA':'VA','WASHINGTON':'WA','WEST VIRGINIA':'WV','WISCONSIN':'WI',
+            'WYOMING':'WY','DISTRICT OF COLUMBIA':'DC','PUERTO RICO':'PR',
+            'VIRGIN ISLANDS':'VI','GUAM':'GU',
+        };
+        const STATE_ABBRS = Object.values(STATE_NAME_TO_ABBR);
+
+        function extractState(name) {
+            if (!name) return '';
+            const upper = name.toUpperCase();
+
+            // 1. PRIORITY: Check for 2-letter abbreviations first (e.g. TX, AL., Ca)
+            //    Scan from end to start since state abbr usually appears last
+            const words = upper.replace(/[.,]+$/g, '').trim().split(/[\s,]+/);
+            for (let i = words.length - 1; i >= 0; i--) {
+                const w = words[i].replace(/[.]/g, '');
+                if (w.length === 2 && STATE_ABBRS.includes(w)) return w;
+            }
+
+            // 2. FALLBACK: Check for full state names (e.g. "ALABAMA", "NEW YORK")
+            //    Only if no abbreviation was found
+            for (const [fullName, abbr] of Object.entries(STATE_NAME_TO_ABBR)) {
+                if (upper.includes(fullName)) return abbr;
+            }
+            return '';
+        }
+
+        let searchActiveIdx = -1;
+
+        function initSearch() {
+            const input = document.getElementById('gage-search');
+            const dropdown = document.getElementById('search-dropdown');
+
+            input.addEventListener('input', () => {
+                const q = input.value.trim();
+                searchActiveIdx = -1;
+                if (q.length < 2) { dropdown.classList.remove('visible'); return; }
+                const results = searchGages(q, 3);
+                renderSearchResults(results, dropdown, q);
+            });
+
+            input.addEventListener('keydown', (e) => {
+                const items = dropdown.querySelectorAll('.search-item');
+                if (!items.length) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    searchActiveIdx = Math.min(searchActiveIdx + 1, items.length - 1);
+                    updateActiveItem(items);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    searchActiveIdx = Math.max(searchActiveIdx - 1, 0);
+                    updateActiveItem(items);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (searchActiveIdx >= 0 && items[searchActiveIdx]) {
+                        items[searchActiveIdx].click();
+                    } else if (items.length > 0) {
+                        items[0].click();
+                    }
+                } else if (e.key === 'Escape') {
+                    dropdown.classList.remove('visible');
+                    input.blur();
+                }
+            });
+
+            // Close dropdown on outside click
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.search-control')) {
+                    dropdown.classList.remove('visible');
+                }
+            });
+        }
+
+        function searchGages(query, limit) {
+            const q = query.toLowerCase();
+            const scored = [];
+            for (const g of allGages) {
+                let score = 0;
+                // Exact prefix match on site_no is highest priority
+                if (g.site_no.startsWith(q)) score = 100 - (g.site_no.length - q.length);
+                // Contains match on site_no
+                else if (g.site_no.includes(q)) score = 50;
+                // Name match
+                else if (g.name.toLowerCase().includes(q)) score = 30;
+                else continue;
+                scored.push({ gage: g, score });
+            }
+            scored.sort((a, b) => b.score - a.score);
+            return scored.slice(0, limit).map(s => s.gage);
+        }
+
+        function renderSearchResults(results, dropdown, query) {
+            if (results.length === 0) {
+                dropdown.innerHTML = '<div class="search-no-results">No gages found</div>';
+                dropdown.classList.add('visible');
+                return;
+            }
+            dropdown.innerHTML = results.map((g, i) => {
+                const state = extractState(g.name);
+                const isCalibrated = g.status === 'calibrated';
+                const dotColor = isCalibrated ? '#2e7d32' : '#e65100';
+                // Highlight matching part in site_no
+                const q = query.toLowerCase();
+                let idHtml = g.site_no;
+                const idx = g.site_no.toLowerCase().indexOf(q);
+                if (idx >= 0) {
+                    idHtml = g.site_no.slice(0, idx) + '<b style="color:#1a73e8">' + g.site_no.slice(idx, idx + q.length) + '</b>' + g.site_no.slice(idx + q.length);
+                }
+                return `
+                    <div class="search-item" data-site="${g.site_no}" onclick="selectSearchResult('${g.site_no}')">
+                        <span class="search-item-dot" style="background:${dotColor}"></span>
+                        <div class="search-item-text">
+                            <div class="search-item-id">${idHtml}</div>
+                            <div class="search-item-name">${g.name}</div>
+                        </div>
+                        ${state ? `<span class="search-item-state">${state}</span>` : ''}
+                    </div>
+                `;
+            }).join('');
+            dropdown.classList.add('visible');
+        }
+
+        function updateActiveItem(items) {
+            items.forEach((el, i) => el.classList.toggle('active', i === searchActiveIdx));
+        }
+
+        function selectSearchResult(siteNo) {
+            const dropdown = document.getElementById('search-dropdown');
+            const input = document.getElementById('gage-search');
+            dropdown.classList.remove('visible');
+            input.value = '';
+
+            // Zoom to gage and open panel
+            const gage = allGages.find(g => g.site_no === siteNo);
+            if (gage) {
+                map.setView([gage.lat, gage.lng], 12, { animate: true });
+            }
+            openPanel(siteNo);
+        }
+
+        // ===== Keyboard =====
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const fs = document.getElementById('fs-overlay');
+                if (fs.classList.contains('active')) { closeFullscreen(); return; }
+                closePanel();
+            }
+            // Ctrl/Cmd+K to focus search
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                document.getElementById('gage-search').focus();
+            }
+        });
+
+        // ===== Init =====
+        initMap();
+        loadGages().then(() => initSearch());
+    </script>
+</body>
+</html>
